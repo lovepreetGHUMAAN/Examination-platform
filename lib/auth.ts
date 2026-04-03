@@ -38,6 +38,10 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
+        if (!process.env.MONGODB_URI) {
+          throw new Error("Database not configured")
+        }
+
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Email and password are required")
         }
@@ -90,5 +94,5 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60, // 30 days
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: process.env.NEXTAUTH_SECRET || "development-secret-change-in-production",
 }
