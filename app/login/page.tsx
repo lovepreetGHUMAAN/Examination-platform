@@ -1,3 +1,4 @@
+// PATH: app/login/page.tsx
 "use client"
 
 import { useState } from "react"
@@ -9,22 +10,23 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { FieldGroup, Field, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
-import { GraduationCap, Mail, Lock } from "lucide-react"
+import { GraduationCap, Mail, Lock, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
 
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard"
+
   const [isLoading, setIsLoading] = useState(false)
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  })
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null)
+  const [resending, setResending] = useState(false)
+  const [formData, setFormData] = useState({ email: "", password: "" })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setUnverifiedEmail(null)
 
     try {
       const result = await signIn("credentials", {
@@ -34,7 +36,12 @@ export default function LoginPage() {
       })
 
       if (result?.error) {
-        toast.error(result.error)
+        // Detect the specific unverified-email error from auth.ts
+        if (result.error.toLowerCase().includes("verify your email")) {
+          setUnverifiedEmail(formData.email)
+        } else {
+          toast.error(result.error)
+        }
       } else {
         toast.success("Welcome back!")
         router.push(callbackUrl)
@@ -44,6 +51,25 @@ export default function LoginPage() {
       toast.error("Something went wrong. Please try again.")
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    if (!unverifiedEmail) return
+    setResending(true)
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: unverifiedEmail }),
+      })
+      const data = await res.json()
+      toast.success(data.message ?? "Verification email sent.")
+      setUnverifiedEmail(null)
+    } catch {
+      toast.error("Failed to resend. Please try again.")
+    } finally {
+      setResending(false)
     }
   }
 
@@ -64,6 +90,32 @@ export default function LoginPage() {
             <CardDescription>Sign in to your account to continue</CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Unverified email banner */}
+            {unverifiedEmail && (
+              <div className="mb-4 p-4 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                      Email not verified
+                    </p>
+                    <p className="text-sm text-amber-700 dark:text-amber-400 mt-0.5">
+                      Please verify <span className="font-medium">{unverifiedEmail}</span> before signing in.
+                    </p>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="px-0 h-auto text-amber-700 dark:text-amber-400 underline mt-1"
+                      onClick={handleResendVerification}
+                      disabled={resending}
+                    >
+                      {resending ? "Sending..." : "Resend verification email"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit}>
               <FieldGroup>
                 <Field>
@@ -84,7 +136,16 @@ export default function LoginPage() {
                 </Field>
 
                 <Field>
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
+                  <div className="flex items-center justify-between">
+                    <FieldLabel htmlFor="password">Password</FieldLabel>
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs text-primary hover:underline"
+                      tabIndex={-1}
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input

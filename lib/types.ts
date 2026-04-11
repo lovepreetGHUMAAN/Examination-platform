@@ -1,3 +1,4 @@
+// PATH: lib/types.ts
 import { ObjectId } from "mongodb"
 
 export type UserRole = "teacher" | "student"
@@ -8,6 +9,11 @@ export interface User {
   email: string
   password: string
   role: UserRole
+  isVerified: boolean
+  emailVerificationToken?: string
+  emailVerificationExpires?: Date
+  passwordResetToken?: string
+  passwordResetExpires?: Date
   createdAt: Date
 }
 
@@ -34,13 +40,10 @@ export interface Question {
   type: QuestionType
   text: string
   marks: number
-  // MCQ specific
   options?: MCQOption[]
   correctOptionId?: string
-  // Numerical specific
   correctAnswer?: number
   tolerance?: number
-  // Subjective specific
   maxWords?: number
   keywords?: string[]
 }
@@ -52,7 +55,7 @@ export interface Test {
   teacherId: ObjectId
   groupIds: ObjectId[]
   questions: Question[]
-  duration: number // in minutes
+  duration: number
   availableFrom: Date
   availableTo: Date
   totalMarks: number
@@ -62,13 +65,9 @@ export interface Test {
 
 export interface Answer {
   questionId: string
-  // MCQ
   selectedOptionId?: string
-  // Numerical
   numericalAnswer?: number
-  // Subjective
   textAnswer?: string
-  // Grading
   marksAwarded?: number
   feedback?: string
   isGraded: boolean
@@ -87,19 +86,18 @@ export interface Submission {
   status: SubmissionStatus
 }
 
-// API response types
 export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
 }
 
-// Extended types for frontend
-export interface GroupWithTeacher extends Omit<Group, "teacherId"> {
+// FIX: Omit _id as well so the string override doesn't conflict with ObjectId
+export interface GroupWithTeacher extends Omit<Group, "teacherId" | "_id"> {
+  _id: string
   teacherId: string
   teacherName: string
   memberCount: number
-  _id: string
 }
 
 export interface TestWithDetails extends Omit<Test, "_id" | "teacherId" | "groupIds"> {

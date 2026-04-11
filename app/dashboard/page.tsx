@@ -1,3 +1,4 @@
+// PATH: app/dashboard/page.tsx
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { TeacherDashboard } from "@/components/dashboard/teacher-dashboard"

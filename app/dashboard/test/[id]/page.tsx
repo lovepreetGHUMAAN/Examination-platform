@@ -1,3 +1,4 @@
+// PATH: app/dashboard/test/[id]/page.tsx
 "use client"
 
 import { use, useState, useEffect, useCallback } from "react"
@@ -5,9 +6,8 @@ import useSWR from "swr"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
-import { Empty } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Input } from "@/components/ui/input"
@@ -47,23 +47,25 @@ export default function TakeTestPage({
   const { id } = use(params)
   const router = useRouter()
   const { data, isLoading, error } = useSWR(`/api/student/tests/${id}`, fetcher)
-  
+
   const [answers, setAnswers] = useState<Answer[]>([])
   const [currentQuestion, setCurrentQuestion] = useState(0)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
-  // Initialize answers from submission data
   useEffect(() => {
     if (data?.data?.submission?.answers) {
       setAnswers(data.data.submission.answers)
     }
   }, [data])
 
-  // Initialize timer
   useEffect(() => {
-    if (data?.data?.test?.duration && data?.data?.submission?.startedAt && !data?.data?.alreadySubmitted) {
+    if (
+      data?.data?.test?.duration &&
+      data?.data?.submission?.startedAt &&
+      !data?.data?.alreadySubmitted
+    ) {
       const startTime = new Date(data.data.submission.startedAt).getTime()
       const duration = data.data.test.duration * 60 * 1000
       const endTime = startTime + duration
@@ -72,10 +74,8 @@ export default function TakeTestPage({
     }
   }, [data])
 
-  // Timer countdown
   useEffect(() => {
     if (timeLeft === null || timeLeft <= 0) return
-
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev === null || prev <= 1) {
@@ -86,11 +86,9 @@ export default function TakeTestPage({
         return prev - 1
       })
     }, 1000)
-
     return () => clearInterval(timer)
   }, [timeLeft])
 
-  // Auto-save
   const saveProgress = useCallback(async () => {
     if (isSaving || !answers.length) return
     setIsSaving(true)
@@ -107,7 +105,6 @@ export default function TakeTestPage({
     }
   }, [id, answers, isSaving])
 
-  // Auto-save every 30 seconds
   useEffect(() => {
     if (data?.data?.alreadySubmitted) return
     const interval = setInterval(saveProgress, 30000)
@@ -116,9 +113,7 @@ export default function TakeTestPage({
 
   const updateAnswer = (questionId: string, update: Partial<Answer>) => {
     setAnswers((prev) =>
-      prev.map((a) =>
-        a.questionId === questionId ? { ...a, ...update } : a
-      )
+      prev.map((a) => (a.questionId === questionId ? { ...a, ...update } : a))
     )
   }
 
@@ -145,7 +140,7 @@ export default function TakeTestPage({
         toast.success("Test submitted successfully!")
       }
 
-      router.push("/dashboard/available-tests")
+      router.push("/dashboard/results")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit test")
       setIsSubmitting(false)
@@ -166,20 +161,22 @@ export default function TakeTestPage({
     )
   }
 
+  // FIX: replaced <Empty> component (which doesn't accept icon/title/description/action props
+  // as HTML div attributes) with plain JSX that avoids the type conflict entirely
   if (error || !data?.success) {
     return (
       <Card>
-        <CardContent className="py-12">
-          <Empty
-            icon={ClipboardList}
-            title="Cannot access test"
-            description={data?.error || "You do not have access to this test"}
-            action={
-              <Link href="/dashboard/available-tests">
-                <Button>Back to Tests</Button>
-              </Link>
-            }
-          />
+        <CardContent className="py-12 flex flex-col items-center text-center gap-4">
+          <ClipboardList className="h-12 w-12 text-muted-foreground" />
+          <div>
+            <p className="font-medium">Cannot access test</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {data?.error || "You do not have access to this test"}
+            </p>
+          </div>
+          <Link href="/dashboard/available-tests">
+            <Button>Back to Tests</Button>
+          </Link>
         </CardContent>
       </Card>
     )
@@ -199,7 +196,7 @@ export default function TakeTestPage({
               <Link href="/dashboard/available-tests">
                 <Button variant="outline">Back to Tests</Button>
               </Link>
-              <Link href="/dashboard/my-results">
+              <Link href="/dashboard/results">
                 <Button>View Results</Button>
               </Link>
             </div>
@@ -213,8 +210,8 @@ export default function TakeTestPage({
   const questions: QuestionData[] = test.questions
   const currentQ = questions[currentQuestion]
   const currentAnswer = answers.find((a) => a.questionId === currentQ?.id)
-  const answeredCount = answers.filter((a) => 
-    a.selectedOptionId || a.numericalAnswer !== undefined || a.textAnswer
+  const answeredCount = answers.filter(
+    (a) => a.selectedOptionId || a.numericalAnswer !== undefined || a.textAnswer
   ).length
   const progress = (answeredCount / questions.length) * 100
 
@@ -230,7 +227,7 @@ export default function TakeTestPage({
         </div>
         <div className="flex items-center gap-4">
           {timeLeft !== null && (
-            <Badge 
+            <Badge
               variant={timeLeft < 300 ? "destructive" : "secondary"}
               className="text-lg px-4 py-2"
             >
@@ -249,7 +246,9 @@ export default function TakeTestPage({
         <CardContent className="py-3">
           <div className="flex items-center justify-between text-sm mb-2">
             <span className="text-muted-foreground">Progress</span>
-            <span className="font-medium">{answeredCount}/{questions.length} answered</span>
+            <span className="font-medium">
+              {answeredCount}/{questions.length} answered
+            </span>
           </div>
           <Progress value={progress} className="h-2" />
         </CardContent>
@@ -259,12 +258,18 @@ export default function TakeTestPage({
       <div className="flex flex-wrap gap-2">
         {questions.map((q, i) => {
           const answer = answers.find((a) => a.questionId === q.id)
-          const isAnswered = answer && (answer.selectedOptionId || answer.numericalAnswer !== undefined || answer.textAnswer)
-          
+          const isAnswered =
+            answer &&
+            (answer.selectedOptionId ||
+              answer.numericalAnswer !== undefined ||
+              answer.textAnswer)
+
           return (
             <Button
               key={q.id}
-              variant={i === currentQuestion ? "default" : isAnswered ? "secondary" : "outline"}
+              variant={
+                i === currentQuestion ? "default" : isAnswered ? "secondary" : "outline"
+              }
               size="sm"
               onClick={() => setCurrentQuestion(i)}
               className="w-10 h-10"
@@ -281,7 +286,11 @@ export default function TakeTestPage({
           <CardHeader>
             <div className="flex items-center justify-between">
               <Badge variant="outline">
-                {currentQ.type === "mcq" ? "Multiple Choice" : currentQ.type === "numerical" ? "Numerical" : "Subjective"}
+                {currentQ.type === "mcq"
+                  ? "Multiple Choice"
+                  : currentQ.type === "numerical"
+                  ? "Numerical"
+                  : "Subjective"}
               </Badge>
               <span className="text-sm text-muted-foreground">{currentQ.marks} marks</span>
             </div>
@@ -316,9 +325,13 @@ export default function TakeTestPage({
                 step="any"
                 placeholder="Enter your numerical answer"
                 value={currentAnswer?.numericalAnswer ?? ""}
-                onChange={(e) => updateAnswer(currentQ.id, { 
-                  numericalAnswer: e.target.value ? parseFloat(e.target.value) : undefined 
-                })}
+                onChange={(e) =>
+                  updateAnswer(currentQ.id, {
+                    numericalAnswer: e.target.value
+                      ? parseFloat(e.target.value)
+                      : undefined,
+                  })
+                }
                 className="text-lg"
               />
             )}
@@ -328,7 +341,9 @@ export default function TakeTestPage({
                 <Textarea
                   placeholder="Write your answer here..."
                   value={currentAnswer?.textAnswer || ""}
-                  onChange={(e) => updateAnswer(currentQ.id, { textAnswer: e.target.value })}
+                  onChange={(e) =>
+                    updateAnswer(currentQ.id, { textAnswer: e.target.value })
+                  }
                   rows={6}
                   className="text-base"
                 />
@@ -356,16 +371,16 @@ export default function TakeTestPage({
 
         <div className="flex gap-2">
           {currentQuestion < questions.length - 1 ? (
-            <Button
-              onClick={() => setCurrentQuestion(currentQuestion + 1)}
-            >
-              Next
-            </Button>
+            <Button onClick={() => setCurrentQuestion(currentQuestion + 1)}>Next</Button>
           ) : (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button disabled={isSubmitting}>
-                  {isSubmitting ? <Spinner className="mr-2" /> : <Send className="mr-2 h-4 w-4" />}
+                  {isSubmitting ? (
+                    <Spinner className="mr-2" />
+                  ) : (
+                    <Send className="mr-2 h-4 w-4" />
+                  )}
                   Submit Test
                 </Button>
               </AlertDialogTrigger>
@@ -373,7 +388,7 @@ export default function TakeTestPage({
                 <AlertDialogHeader>
                   <AlertDialogTitle>Submit your test?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    You have answered {answeredCount} out of {questions.length} questions. 
+                    You have answered {answeredCount} out of {questions.length} questions.
                     Once submitted, you cannot make changes.
                   </AlertDialogDescription>
                 </AlertDialogHeader>

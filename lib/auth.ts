@@ -1,47 +1,19 @@
-import type { NextAuthOptions } from "next-auth"
+// PATH: lib/auth.ts
+import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
-import { getDatabase } from "./mongodb"
+import { getDatabase } from "@/lib/mongodb"
 import bcrypt from "bcryptjs"
-import type { User } from "./types"
-
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string
-      email: string
-      name: string
-      role: "teacher" | "student"
-    }
-  }
-
-  interface User {
-    id: string
-    email: string
-    name: string
-    role: "teacher" | "student"
-  }
-}
-
-declare module "next-auth/jwt" {
-  interface JWT {
-    id: string
-    role: "teacher" | "student"
-  }
-}
+import type { User, UserRole } from "@/lib/types"
 
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
-      name: "Credentials",
+      name: "credentials",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!process.env.MONGODB_URI) {
-          throw new Error("Database not configured")
-        }
-
         if (!credentials?.email || !credentials?.password) {
           throw new Error("Email and password are required")
         }
@@ -52,47 +24,57 @@ export const authOptions: NextAuthOptions = {
         })
 
         if (!user) {
-          throw new Error("No account found with this email")
+          throw new Error("Invalid email or password")
         }
 
         const isValid = await bcrypt.compare(credentials.password, user.password)
-
         if (!isValid) {
-          throw new Error("Invalid password")
+          throw new Error("Invalid email or password")
+        }
+
+        if (!user.isVerified) {
+          throw new Error("Please verify your email before signing in. Check your inbox for the verification link.")
         }
 
         return {
           id: user._id!.toString(),
           email: user.email,
           name: user.name,
-          role: user.role,
+          // FIX: cast to UserRole — authorize() return type uses next-auth's User
+          // which types role as string; we know it's always UserRole from the DB
+          role: user.role as UserRole,
         }
       },
     }),
   ],
+
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id
-        token.role = user.role
+        // FIX: user.role comes from authorize() return, cast to preserve the value
+        token.role = (user as unknown as { role: UserRole }).role
       }
       return token
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id
-        session.user.role = token.role
+      if (token) {
+        session.user.id = token.id as string
+        // FIX: cast through unknown to avoid string→UserRole assignment error
+        session.user.role = token.role as UserRole
       }
       return session
     },
   },
+
   pages: {
     signIn: "/login",
     error: "/login",
   },
+
   session: {
     strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
   },
-  secret: process.env.NEXTAUTH_SECRET || "development-secret-change-in-production",
+
+  secret: process.env.NEXTAUTH_SECRET,
 }

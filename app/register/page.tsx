@@ -1,7 +1,7 @@
+// PATH: app/register/page.tsx
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,12 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { FieldGroup, Field, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { GraduationCap, Mail, Lock, User, BookOpen, Users } from "lucide-react"
+import { GraduationCap, Mail, Lock, User, BookOpen, Users, MailCheck } from "lucide-react"
 import { toast } from "sonner"
 
 export default function RegisterPage() {
-  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const [registered, setRegistered] = useState(false)
+  const [registeredEmail, setRegisteredEmail] = useState("")
+  const [resending, setResending] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -56,8 +58,8 @@ export default function RegisterPage() {
         throw new Error(data.error || "Registration failed")
       }
 
-      toast.success("Account created successfully! Please sign in.")
-      router.push("/login")
+      setRegisteredEmail(formData.email)
+      setRegistered(true)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Registration failed")
     } finally {
@@ -65,6 +67,75 @@ export default function RegisterPage() {
     }
   }
 
+  const handleResend = async () => {
+    setResending(true)
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: registeredEmail }),
+      })
+      const data = await res.json()
+      toast.success(data.message ?? "Verification email resent.")
+    } catch {
+      toast.error("Failed to resend. Please try again.")
+    } finally {
+      setResending(false)
+    }
+  }
+
+  // ── Post-registration success screen ────────────────────────────────────────
+  if (registered) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <div className="w-full max-w-md">
+          <div className="flex flex-col items-center mb-8">
+            <div className="flex items-center gap-2 mb-2">
+              <GraduationCap className="h-10 w-10 text-primary" />
+              <span className="text-3xl font-bold text-foreground">ExamHub</span>
+            </div>
+          </div>
+
+          <Card>
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-3">
+                <MailCheck className="h-12 w-12 text-primary" />
+              </div>
+              <CardTitle>Check your email</CardTitle>
+              <CardDescription>
+                We've sent a verification link to{" "}
+                <span className="font-medium text-foreground">{registeredEmail}</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                Click the link in that email to activate your account. The link expires in 24 hours.
+              </p>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleResend}
+                disabled={resending}
+              >
+                {resending ? <Spinner className="mr-2" /> : null}
+                {resending ? "Sending..." : "Resend verification email"}
+              </Button>
+
+              <p className="text-sm text-muted-foreground">
+                Already verified?{" "}
+                <Link href="/login" className="text-primary hover:underline font-medium">
+                  Sign in
+                </Link>
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Registration form ────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 py-8">
       <div className="w-full max-w-md">
@@ -171,7 +242,9 @@ export default function RegisterPage() {
                       <RadioGroupItem value="student" id="student" className="sr-only" />
                       <BookOpen className="h-6 w-6 text-primary" />
                       <span className="font-medium">Student</span>
-                      <span className="text-xs text-muted-foreground text-center">Take exams and track progress</span>
+                      <span className="text-xs text-muted-foreground text-center">
+                        Take exams and track progress
+                      </span>
                     </label>
                     <label
                       htmlFor="teacher"
@@ -184,7 +257,9 @@ export default function RegisterPage() {
                       <RadioGroupItem value="teacher" id="teacher" className="sr-only" />
                       <Users className="h-6 w-6 text-primary" />
                       <span className="font-medium">Teacher</span>
-                      <span className="text-xs text-muted-foreground text-center">Create tests and manage classes</span>
+                      <span className="text-xs text-muted-foreground text-center">
+                        Create tests and manage classes
+                      </span>
                     </label>
                   </RadioGroup>
                 </Field>

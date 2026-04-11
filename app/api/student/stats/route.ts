@@ -1,3 +1,4 @@
+// PATH: app/api/student/stats/route.ts
 import { NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
@@ -8,32 +9,23 @@ import type { Group, Test, Submission } from "@/lib/types"
 export async function GET() {
   try {
     const session = await getServerSession(authOptions)
-
-    if (!session || session.user.role !== "student") {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      )
+    if (!session?.user?.id || session.user.role !== "student") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const db = await getDatabase()
     const studentId = new ObjectId(session.user.id)
+    const now = new Date()
 
-    // Get enrolled groups
-    const enrolledGroups = await db
+    // Groups student is enrolled in
+    const groups = await db
       .collection<Group>("groups")
       .find({ memberIds: studentId })
       .toArray()
 
-    // Get pending join requests
-    const pendingRequests = await db
-      .collection<Group>("groups")
-      .countDocuments({ pendingRequests: studentId })
+    const groupIds = groups.map((g) => g._id!)
 
-    // Get available tests
-    const now = new Date()
-    const groupIds = enrolledGroups.map((g) => g._id!)
-
+    // All published, currently available tests for these groups
     const availableTests = await db
       .collection<Test>("tests")
       .find({
@@ -42,119 +34,116 @@ export async function GET() {
         availableFrom: { $lte: now },
         availableTo: { $gte: now },
       })
+      .sort({ availableTo: 1 })
       .toArray()
 
-    // Filter out tests already completed
+    // Student's completed submissions
     const submissions = await db
       .collection<Submission>("submissions")
-      .find({ studentId })
+      .find({ studentId, status: { $in: ["submitted", "graded"] } })
+      .sort({ submittedAt: -1 })
       .toArray()
 
-    const completedTestIds = new Set(
-      submissions
-        .filter((s) => s.status === "submitted" || s.status === "graded")
-        .map((s) => s.testId.toString())
-    )
+    // In-progress submissions
+    const inProgressSubs = await db
+      .collection<Submission>("submissions")
+      .find({ studentId, status: "in-progress" })
+      .toArray()
+    const inProgressTestIds = new Set(inProgressSubs.map((s) => s.testId.toString()))
 
-    const testsNotCompleted = availableTests.filter(
-      (t) => !completedTestIds.has(t._id!.toString())
-    )
-
-    // Get completed tests count
-    const completedTests = submissions.filter(
-      (s) => s.status === "submitted" || s.status === "graded"
-    ).length
-
-    // Calculate average score
-    const gradedSubmissions = submissions.filter((s) => s.status === "graded")
-    let averageScore: number | undefined
-    if (gradedSubmissions.length > 0) {
-      const testMap = new Map<string, Test>()
-      const testIdsToFetch = gradedSubmissions.map((s) => s.testId)
-      const testsForScores = await db
-        .collection<Test>("tests")
-        .find({ _id: { $in: testIdsToFetch } })
-        .toArray()
-      testsForScores.forEach((t) => testMap.set(t._id!.toString(), t))
-
-      let totalPercentage = 0
-      let count = 0
-      gradedSubmissions.forEach((s) => {
-        const test = testMap.get(s.testId.toString())
-        if (test && s.totalMarksAwarded !== undefined) {
-          totalPercentage += (s.totalMarksAwarded / test.totalMarks) * 100
-          count++
-        }
-      })
-      if (count > 0) {
-        averageScore = Math.round(totalPercentage / count)
-      }
-    }
-
-    // Get upcoming tests with group names
-    const groupMap = new Map<string, string>()
-    enrolledGroups.forEach((g) => groupMap.set(g._id!.toString(), g.name))
-
-    const upcomingTests = testsNotCompleted.slice(0, 3).map((t) => {
-      const groupName = t.groupIds
-        .map((gid) => groupMap.get(gid.toString()))
-        .filter(Boolean)[0] || "Unknown"
+    // Enrich available tests with submission status
+    const enrichedTests = availableTests.map((test) => {
+      const submitted = submissions.find((s) => s.testId.toString() === test._id!.toString())
+      const inProgress = inProgressTestIds.has(test._id!.toString())
+      const group = groups.find((g) =>
+        test.groupIds.some((gid) => gid.toString() === g._id!.toString())
+      )
       return {
-        _id: t._id!.toString(),
-        title: t.title,
-        duration: t.duration,
-        availableTo: t.availableTo.toISOString(),
-        groupName,
+        _id: test._id!.toString(),
+        title: test.title,
+        duration: test.duration,
+        totalMarks: test.totalMarks,
+        availableTo: test.availableTo,
+        groupName: group?.name || "",
+        submissionStatus: submitted ? submitted.status : inProgress ? "in-progress" : null,
       }
     })
 
-    // Get recent results
-    const recentSubmissions = await db
-      .collection<Submission>("submissions")
-      .find({
-        studentId,
-        status: { $in: ["submitted", "graded"] },
-      })
-      .sort({ submittedAt: -1 })
-      .limit(3)
-      .toArray()
+    // Filter to only not-yet-submitted
+    const notYetSubmitted = enrichedTests.filter(
+      (t) => !t.submissionStatus || t.submissionStatus === "in-progress"
+    )
 
-    const testIdsForResults = recentSubmissions.map((s) => s.testId)
-    const testsForResults = await db
+    // Fetch tests for completed submissions to calculate scores
+    const submittedTestIds = submissions.map((s) => s.testId)
+    const submittedTests = await db
       .collection<Test>("tests")
-      .find({ _id: { $in: testIdsForResults } })
+      .find({ _id: { $in: submittedTestIds } })
       .toArray()
-    const testResultMap = new Map<string, Test>()
-    testsForResults.forEach((t) => testResultMap.set(t._id!.toString(), t))
 
-    const recentResults = recentSubmissions.map((s) => {
-      const test = testResultMap.get(s.testId.toString())
+    const recentResults = submissions.slice(0, 5).map((sub) => {
+      const test = submittedTests.find((t) => t._id!.toString() === sub.testId.toString())
+      const hasSubjective = test?.questions?.some((q) => q.type === "subjective")
+      const needsGrading = hasSubjective && sub.status === "submitted"
       return {
-        _id: s._id!.toString(),
-        testTitle: test?.title || "Unknown Test",
-        totalMarksAwarded: s.totalMarksAwarded || 0,
-        totalMarks: test?.totalMarks || 100,
-        status: s.status,
+        _id: sub._id!.toString(),
+        testTitle: test?.title || "Unknown",
+        totalScore: sub.totalMarksAwarded ?? 0,
+        maxScore: test?.totalMarks ?? 0,
+        submittedAt: sub.submittedAt,
+        needsGrading,
+      }
+    })
+
+    // Avg and best score
+    const scoredResults = recentResults.filter((r) => !r.needsGrading && r.maxScore > 0)
+    const percentages = scoredResults.map((r) => Math.round((r.totalScore / r.maxScore) * 100))
+    const avgScore =
+      percentages.length > 0
+        ? Math.round(percentages.reduce((a, b) => a + b, 0) / percentages.length)
+        : null
+    const bestScore = percentages.length > 0 ? Math.max(...percentages) : null
+
+    // Enrich groups with teacher info
+    const teacherIds = groups.map((g) => g.teacherId)
+    const teachers = await db
+      .collection("users")
+      .find({ _id: { $in: teacherIds } }, { projection: { name: 1 } })
+      .toArray()
+
+    const enrichedGroups = groups.map((g) => {
+      const teacher = teachers.find((t) => t._id.toString() === g.teacherId.toString())
+      const testsForGroup = notYetSubmitted.filter((t) =>
+        availableTests.find(
+          (at) =>
+            at._id!.toString() === t._id &&
+            at.groupIds.some((gid) => gid.toString() === g._id!.toString())
+        )
+      )
+      return {
+        _id: g._id!.toString(),
+        name: g.name,
+        teacherName: teacher?.name || "Unknown",
+        memberCount: (g.memberIds || []).length,
+        availableTestsCount: testsForGroup.length,
       }
     })
 
     return NextResponse.json({
       success: true,
       data: {
-        enrolledGroups: enrolledGroups.length,
-        pendingRequests,
-        availableTests: testsNotCompleted.length,
-        completedTests,
-        averageScore,
-        upcomingTests,
+        testsTaken: submissions.length,
+        testsAvailable: notYetSubmitted.length,
+        groupsJoined: groups.length,
+        avgScore,
+        bestScore,
+        availableTests: notYetSubmitted.slice(0, 4),
         recentResults,
+        groups: enrichedGroups,
       },
     })
   } catch (error) {
     console.error("Student stats error:", error)
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch stats" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
