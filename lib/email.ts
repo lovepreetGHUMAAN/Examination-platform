@@ -1,16 +1,22 @@
 // PATH: lib/email.ts
-import { Resend } from "resend"
+import nodemailer from "nodemailer"
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,       // your gmail
+    pass: process.env.EMAIL_PASS,       // app password (NOT normal password)
+  },
+})
 
-const FROM = process.env.RESEND_FROM ?? "ExamHub <onboarding@resend.dev>"
+const FROM = process.env.EMAIL_USER
 const BASE_URL = process.env.NEXTAUTH_URL ?? "http://localhost:3000"
 
 export async function sendVerificationEmail(email: string, token: string) {
   const url = `${BASE_URL}/verify-email?token=${token}`
 
-  await resend.emails.send({
-    from: FROM,
+  await transporter.sendMail({
+    from: `ExamHub <${FROM}>`,
     to: email,
     subject: "Verify your ExamHub account",
     html: `
@@ -35,8 +41,8 @@ export async function sendVerificationEmail(email: string, token: string) {
 export async function sendPasswordResetEmail(email: string, token: string) {
   const url = `${BASE_URL}/reset-password?token=${token}`
 
-  await resend.emails.send({
-    from: FROM,
+  await transporter.sendMail({
+    from: `ExamHub <${FROM}>`,
     to: email,
     subject: "Reset your ExamHub password",
     html: `
