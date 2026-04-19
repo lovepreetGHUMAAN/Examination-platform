@@ -2,16 +2,30 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-function Empty({ className, ...props }: React.ComponentProps<'div'>) {
+import { LucideIcon } from "lucide-react"
+
+interface EmptyProps {
+  icon?: LucideIcon
+  title: string
+  description?: string
+  action?: React.ReactNode
+}
+
+function Empty({
+  icon: Icon,
+  title,
+  description,
+  action,
+}: EmptyProps) {
   return (
-    <div
-      data-slot="empty"
-      className={cn(
-        'flex min-w-0 flex-1 flex-col items-center justify-center gap-6 rounded-lg border-dashed p-6 text-center text-balance md:p-12',
-        className,
+    <div className="flex flex-col items-center justify-center text-center">
+      {Icon && <Icon className="h-10 w-10 text-muted-foreground mb-4" />}
+      <h3 className="text-lg font-semibold">{title}</h3>
+      {description && (
+        <p className="text-sm text-muted-foreground mt-1">{description}</p>
       )}
-      {...props}
-    />
+      {action && <div className="mt-4">{action}</div>}
+    </div>
   )
 }
 

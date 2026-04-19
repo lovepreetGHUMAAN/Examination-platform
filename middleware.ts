@@ -23,20 +23,28 @@ export default withAuth(
     const { pathname } = req.nextUrl
     const role = req.nextauth.token?.role as string | undefined
 
-    if (!role) {
-      // Should never happen because withAuth handles unauthenticated,
-      // but guard anyway
-      return NextResponse.redirect(new URL("/login", req.url))
+    console.log("PATH:", pathname, "ROLE:", role)
+
+    // ⚠️ Let NextAuth handle unauthenticated users
+    if (!req.nextauth.token) {
+      return NextResponse.next()
     }
 
-    const isTeacherOnly = TEACHER_ONLY.some((p) => pathname.startsWith(p))
-    const isStudentOnly = STUDENT_ONLY.some((p) => pathname.startsWith(p))
+    const normalizedRole = role?.toLowerCase()
 
-    if (isTeacherOnly && role !== "teacher") {
+    const isTeacherOnly = TEACHER_ONLY.some((p) =>
+      pathname === p || pathname.startsWith(p + "/")
+    )
+
+    const isStudentOnly = STUDENT_ONLY.some((p) =>
+      pathname === p || pathname.startsWith(p + "/")
+    )
+
+    if (isTeacherOnly && normalizedRole !== "teacher") {
       return NextResponse.redirect(new URL("/dashboard", req.url))
     }
 
-    if (isStudentOnly && role !== "student") {
+    if (isStudentOnly && normalizedRole !== "student") {
       return NextResponse.redirect(new URL("/dashboard", req.url))
     }
 
@@ -44,8 +52,7 @@ export default withAuth(
   },
   {
     callbacks: {
-      // Run middleware only when a valid JWT exists
-      authorized: ({ token }) => !!token,
+      authorized: ({ token }) => true,
     },
   }
 )

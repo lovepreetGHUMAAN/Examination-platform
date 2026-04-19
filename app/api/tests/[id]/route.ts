@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { getDatabase } from "@/lib/mongodb"
 import { ObjectId } from "mongodb"
 import type { Test, Group, Submission } from "@/lib/types"
+import { DEFAULT_ANTI_CHEATING } from "@/lib/types"
 
 // GET single test with details
 export async function GET(
@@ -25,10 +26,7 @@ export async function GET(
     const testId = new ObjectId(id)
     const teacherId = new ObjectId(session.user.id)
 
-    const test = await db.collection<Test>("tests").findOne({
-      _id: testId,
-      teacherId,
-    })
+    const test = await db.collection<Test>("tests").findOne({ _id: testId, teacherId })
 
     if (!test) {
       return NextResponse.json(
@@ -37,13 +35,11 @@ export async function GET(
       )
     }
 
-    // Get group details
     const groups = await db
       .collection<Group>("groups")
       .find({ _id: { $in: test.groupIds } })
       .toArray()
 
-    // Get submission count
     const submissionCount = await db
       .collection<Submission>("submissions")
       .countDocuments({ testId })
@@ -60,11 +56,9 @@ export async function GET(
         availableTo: test.availableTo.toISOString(),
         totalMarks: test.totalMarks,
         isPublished: test.isPublished,
+        antiCheating: test.antiCheating ?? DEFAULT_ANTI_CHEATING,
         createdAt: test.createdAt.toISOString(),
-        groups: groups.map((g) => ({
-          _id: g._id!.toString(),
-          name: g.name,
-        })),
+        groups: groups.map((g) => ({ _id: g._id!.toString(), name: g.name })),
         submissionCount,
       },
     })
@@ -103,13 +97,13 @@ export async function PUT(
       availableTo,
       groupIds,
       isPublished,
+      antiCheating,
     } = body
 
     const db = await getDatabase()
     const testId = new ObjectId(id)
     const teacherId = new ObjectId(session.user.id)
 
-    // Calculate total marks if questions provided
     const totalMarks = questions
       ? questions.reduce((sum: number, q: { marks: number }) => sum + q.marks, 0)
       : undefined
@@ -124,13 +118,15 @@ export async function PUT(
     if (duration !== undefined) updateData.duration = duration
     if (availableFrom !== undefined) updateData.availableFrom = new Date(availableFrom)
     if (availableTo !== undefined) updateData.availableTo = new Date(availableTo)
-    if (groupIds !== undefined) updateData.groupIds = groupIds.map((id: string) => new ObjectId(id))
+    if (groupIds !== undefined)
+      updateData.groupIds = groupIds.map((gid: string) => new ObjectId(gid))
     if (isPublished !== undefined) updateData.isPublished = isPublished
+    if (antiCheating !== undefined)
+      updateData.antiCheating = { ...DEFAULT_ANTI_CHEATING, ...antiCheating }
 
-    const result = await db.collection<Test>("tests").updateOne(
-      { _id: testId, teacherId },
-      { $set: updateData }
-    )
+    const result = await db
+      .collection<Test>("tests")
+      .updateOne({ _id: testId, teacherId }, { $set: updateData })
 
     if (result.matchedCount === 0) {
       return NextResponse.json(
@@ -169,13 +165,11 @@ export async function DELETE(
     const testId = new ObjectId(id)
     const teacherId = new ObjectId(session.user.id)
 
-    // Delete test and its submissions
     await db.collection<Submission>("submissions").deleteMany({ testId })
 
-    const result = await db.collection<Test>("tests").deleteOne({
-      _id: testId,
-      teacherId,
-    })
+    const result = await db
+      .collection<Test>("tests")
+      .deleteOne({ _id: testId, teacherId })
 
     if (result.deletedCount === 0) {
       return NextResponse.json(

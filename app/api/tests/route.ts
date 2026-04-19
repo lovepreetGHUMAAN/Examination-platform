@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth"
 import { getDatabase } from "@/lib/mongodb"
 import { ObjectId } from "mongodb"
 import type { Test, Group } from "@/lib/types"
+import { DEFAULT_ANTI_CHEATING } from "@/lib/types"
 
 // GET all tests for a teacher
 export async function GET() {
@@ -47,6 +48,7 @@ export async function GET() {
       availableFrom: t.availableFrom.toISOString(),
       availableTo: t.availableTo.toISOString(),
       groupNames: t.groupIds.map((gid) => groupMap.get(gid.toString()) || "Unknown"),
+      antiCheating: t.antiCheating ?? DEFAULT_ANTI_CHEATING,
       createdAt: t.createdAt.toISOString(),
     }))
 
@@ -82,6 +84,7 @@ export async function POST(request: Request) {
       availableTo,
       groupIds,
       isPublished,
+      antiCheating,
     } = body
 
     if (!title || !questions || questions.length === 0) {
@@ -108,6 +111,7 @@ export async function POST(request: Request) {
       availableTo: new Date(availableTo || Date.now() + 7 * 24 * 60 * 60 * 1000),
       totalMarks,
       isPublished: isPublished || false,
+      antiCheating: { ...DEFAULT_ANTI_CHEATING, ...(antiCheating ?? {}) },
       createdAt: new Date(),
     }
 
@@ -115,9 +119,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      data: {
-        _id: result.insertedId.toString(),
-      },
+      data: { _id: result.insertedId.toString() },
     })
   } catch (error) {
     console.error("Create test error:", error)

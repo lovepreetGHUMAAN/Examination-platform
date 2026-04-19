@@ -5,11 +5,17 @@ import useSWR from "swr"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from "@/components/ui/separator"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,17 +32,38 @@ import {
   Clock,
   Users,
   ClipboardList,
-  Edit,
   Trash2,
   Eye,
   EyeOff,
   Calendar,
+  ShieldCheck,
+  ShieldOff,
+  ArrowRight,
 } from "lucide-react"
 import { toast } from "sonner"
 import { format } from "date-fns"
-import type { Question } from "@/lib/types"
+import type { Question, AntiCheatingSettings } from "@/lib/types"
+import { DEFAULT_ANTI_CHEATING } from "@/lib/types"
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json())
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
+
+const QUESTION_TYPE_LABELS: Record<string, string> = {
+  mcq: "MCQ",
+  "true-false": "True/False",
+  numerical: "Numerical",
+  "fill-blank": "Fill Blank",
+  match: "Match",
+  subjective: "Subjective",
+}
+
+const AC_LABELS: Partial<Record<keyof AntiCheatingSettings, string>> = {
+  requireFullscreen: "Fullscreen required",
+  blockTabSwitch: "Tab-switch detection",
+  requireCamera: "Camera access",
+  requireMicrophone: "Microphone access",
+  disableRightClick: "Right-click disabled",
+  disableCopyPaste: "Copy/paste disabled",
+}
 
 export default function TestDetailPage({
   params,
@@ -57,9 +84,7 @@ export default function TestDetailPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isPublished: !data?.data?.isPublished }),
       })
-
       if (!response.ok) throw new Error("Failed to update test")
-
       toast.success(data?.data?.isPublished ? "Test unpublished" : "Test published")
       mutate()
     } catch {
@@ -73,9 +98,7 @@ export default function TestDetailPage({
     setIsDeleting(true)
     try {
       const response = await fetch(`/api/tests/${id}`, { method: "DELETE" })
-
       if (!response.ok) throw new Error("Failed to delete test")
-
       toast.success("Test deleted successfully")
       router.push("/dashboard/tests")
     } catch {
@@ -112,9 +135,14 @@ export default function TestDetailPage({
   }
 
   const test = data.data
+  const ac: AntiCheatingSettings = test.antiCheating ?? DEFAULT_ANTI_CHEATING
+  const activeAC = (Object.keys(AC_LABELS) as (keyof AntiCheatingSettings)[]).filter(
+    (k) => ac[k] === true
+  )
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-4">
         <Link href="/dashboard/tests">
           <Button variant="ghost" size="icon">
@@ -133,11 +161,7 @@ export default function TestDetailPage({
           )}
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={togglePublish}
-            disabled={isUpdating}
-          >
+          <Button variant="outline" onClick={togglePublish} disabled={isUpdating}>
             {isUpdating ? (
               <Spinner className="mr-2" />
             ) : test.isPublished ? (
@@ -151,11 +175,13 @@ export default function TestDetailPage({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Main Content */}
+        {/* ── Questions ── */}
         <div className="lg:col-span-2">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Questions ({test.questions.length})</CardTitle>
+              <CardTitle className="text-lg">
+                Questions ({test.questions.length})
+              </CardTitle>
               <CardDescription>Total marks: {test.totalMarks}</CardDescription>
             </CardHeader>
             <CardContent>
@@ -166,17 +192,16 @@ export default function TestDetailPage({
                       <div className="flex items-center gap-2">
                         <span className="font-medium">Q{index + 1}.</span>
                         <Badge variant="outline" className="text-xs">
-                          {question.type === "mcq"
-                            ? "MCQ"
-                            : question.type === "numerical"
-                            ? "Numerical"
-                            : "Subjective"}
+                          {QUESTION_TYPE_LABELS[question.type] ?? question.type}
                         </Badge>
                       </div>
-                      <span className="text-sm text-muted-foreground">{question.marks} marks</span>
+                      <span className="text-sm text-muted-foreground">
+                        {question.marks} marks
+                      </span>
                     </div>
                     <p className="mb-3 whitespace-pre-wrap">{question.text}</p>
-                    
+
+                    {/* MCQ */}
                     {question.type === "mcq" && question.options && (
                       <div className="space-y-1 ml-4">
                         {question.options.map((option, i) => (
@@ -189,12 +214,23 @@ export default function TestDetailPage({
                             }`}
                           >
                             {String.fromCharCode(65 + i)}. {option.text}
-                            {option.id === question.correctOptionId && " (Correct)"}
+                            {option.id === question.correctOptionId && " ✓"}
                           </div>
                         ))}
                       </div>
                     )}
 
+                    {/* True/False */}
+                    {question.type === "true-false" && (
+                      <p className="text-sm text-muted-foreground ml-4">
+                        Correct:{" "}
+                        <span className="font-medium text-accent">
+                          {question.correctBoolean ? "True" : "False"}
+                        </span>
+                      </p>
+                    )}
+
+                    {/* Numerical */}
                     {question.type === "numerical" && (
                       <p className="text-sm text-muted-foreground ml-4">
                         Answer: {question.correctAnswer}
@@ -202,6 +238,37 @@ export default function TestDetailPage({
                       </p>
                     )}
 
+                    {/* Fill-blank */}
+                    {question.type === "fill-blank" && question.blanks && (
+                      <div className="ml-4 space-y-1">
+                        {question.blanks.map((b, i) => (
+                          <p key={i} className="text-sm text-muted-foreground">
+                            Blank {i + 1}:{" "}
+                            <span className="font-medium text-accent">{b}</span>
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Match */}
+                    {question.type === "match" && question.matchPairs && (
+                      <div className="ml-4 space-y-1">
+                        {question.matchPairs.map((pair) => (
+                          <div
+                            key={pair.id}
+                            className="text-sm text-muted-foreground flex items-center gap-2"
+                          >
+                            <span className="font-medium">{pair.left}</span>
+                            <ArrowRight className="h-3 w-3" />
+                            <span className="text-accent font-medium">
+                              {pair.right}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Subjective */}
                     {question.type === "subjective" && question.maxWords && (
                       <p className="text-sm text-muted-foreground ml-4">
                         Max words: {question.maxWords}
@@ -214,8 +281,9 @@ export default function TestDetailPage({
           </Card>
         </div>
 
-        {/* Sidebar */}
+        {/* ── Sidebar ── */}
         <div className="space-y-6">
+          {/* Test details */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Test Details</CardTitle>
@@ -233,7 +301,7 @@ export default function TestDetailPage({
                 <div>
                   <p className="text-sm text-muted-foreground">Available</p>
                   <p className="font-medium">
-                    {format(new Date(test.availableFrom), "MMM d, yyyy")} -{" "}
+                    {format(new Date(test.availableFrom), "MMM d, yyyy")} –{" "}
                     {format(new Date(test.availableTo), "MMM d, yyyy")}
                   </p>
                 </div>
@@ -248,6 +316,64 @@ export default function TestDetailPage({
             </CardContent>
           </Card>
 
+          {/* Anti-cheating summary */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                {activeAC.length > 0 ? (
+                  <ShieldCheck className="h-5 w-5 text-green-500" />
+                ) : (
+                  <ShieldOff className="h-5 w-5 text-muted-foreground" />
+                )}
+                <CardTitle className="text-lg">Anti-Cheating</CardTitle>
+                {activeAC.length > 0 && (
+                  <Badge variant="secondary" className="ml-auto">
+                    {activeAC.length} active
+                  </Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {activeAC.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No anti-cheating measures enabled for this test.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {activeAC.map((k) => (
+                    <div key={k} className="flex items-center gap-2 text-sm">
+                      <ShieldCheck className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                      <span>{AC_LABELS[k]}</span>
+                    </div>
+                  ))}
+                  {(ac.requireFullscreen || ac.blockTabSwitch) &&
+                    ac.maxViolations > 0 && (
+                      <>
+                        <Separator />
+                        <p className="text-sm text-muted-foreground">
+                          Auto-submit after{" "}
+                          <span className="font-medium">
+                            {ac.maxViolations}
+                          </span>{" "}
+                          violation{ac.maxViolations !== 1 ? "s" : ""}
+                        </p>
+                      </>
+                    )}
+                  {(ac.requireFullscreen || ac.blockTabSwitch) &&
+                    ac.maxViolations === 0 && (
+                      <>
+                        <Separator />
+                        <p className="text-sm text-muted-foreground">
+                          Warn only — no auto-submit
+                        </p>
+                      </>
+                    )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Assigned groups */}
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Assigned Groups</CardTitle>
@@ -256,7 +382,10 @@ export default function TestDetailPage({
               {test.groups.length > 0 ? (
                 <div className="space-y-2">
                   {test.groups.map((group: { _id: string; name: string }) => (
-                    <div key={group._id} className="flex items-center gap-2 p-2 border rounded">
+                    <div
+                      key={group._id}
+                      className="flex items-center gap-2 p-2 border rounded"
+                    >
                       <Users className="h-4 w-4 text-muted-foreground" />
                       <span>{group.name}</span>
                     </div>
@@ -274,6 +403,7 @@ export default function TestDetailPage({
             </Link>
           )}
 
+          {/* Danger zone */}
           <Card className="border-destructive/50">
             <CardHeader>
               <CardTitle className="text-lg text-destructive">Danger Zone</CardTitle>
@@ -281,8 +411,16 @@ export default function TestDetailPage({
             <CardContent>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
-                  <Button variant="destructive" className="w-full" disabled={isDeleting}>
-                    {isDeleting ? <Spinner className="mr-2" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? (
+                      <Spinner className="mr-2" />
+                    ) : (
+                      <Trash2 className="mr-2 h-4 w-4" />
+                    )}
                     Delete Test
                   </Button>
                 </AlertDialogTrigger>
@@ -290,7 +428,7 @@ export default function TestDetailPage({
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete this test?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will permanently delete the test and all submissions. 
+                      This will permanently delete the test and all submissions.
                       This action cannot be undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>

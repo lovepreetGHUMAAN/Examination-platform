@@ -3,9 +3,71 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { getDatabase } from "@/lib/mongodb"
 import { ObjectId } from "mongodb"
-import type { Test, Group, Submission, Answer } from "@/lib/types"
+import type { Test, Group, Submission, Answer, ViolationEvent } from "@/lib/types"
 
-// GET test details for taking
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function gradeAnswer(
+  question: Test["questions"][number],
+  answer: Answer
+): { marksAwarded: number; isGraded: boolean } {
+  switch (question.type) {
+    case "mcq": {
+      const correct = answer.selectedOptionId === question.correctOptionId
+      return { marksAwarded: correct ? question.marks : 0, isGraded: true }
+    }
+    case "true-false": {
+      const correct =
+        answer.booleanAnswer !== undefined &&
+        answer.booleanAnswer === question.correctBoolean
+      return { marksAwarded: correct ? question.marks : 0, isGraded: true }
+    }
+    case "numerical": {
+      const tolerance = question.tolerance ?? 0
+      const correctAnswer = question.correctAnswer ?? 0
+      const studentAnswer = answer.numericalAnswer ?? 0
+      const correct = Math.abs(studentAnswer - correctAnswer) <= tolerance
+      return { marksAwarded: correct ? question.marks : 0, isGraded: true }
+    }
+    case "fill-blank": {
+      if (!answer.textAnswer || !question.blanks?.length)
+        return { marksAwarded: 0, isGraded: true }
+      const studentParts = answer.textAnswer
+        .split("|")
+        .map((s) => s.trim().toLowerCase())
+      const correctParts = question.blanks.map((b) => b.trim().toLowerCase())
+      const correct =
+        studentParts.length === correctParts.length &&
+        studentParts.every((p, i) => p === correctParts[i])
+      return { marksAwarded: correct ? question.marks : 0, isGraded: true }
+    }
+    case "match": {
+      if (!answer.matchAnswer || !question.matchPairs?.length)
+        return { marksAwarded: 0, isGraded: true }
+      try {
+        const studentMatches: { pairId: string; selectedRight: string }[] =
+          JSON.parse(answer.matchAnswer)
+        const correct = question.matchPairs.every((pair) => {
+          const sm = studentMatches.find((m) => m.pairId === pair.id)
+          return (
+            sm?.selectedRight.trim().toLowerCase() ===
+            pair.right.trim().toLowerCase()
+          )
+        })
+        return { marksAwarded: correct ? question.marks : 0, isGraded: true }
+      } catch {
+        return { marksAwarded: 0, isGraded: true }
+      }
+    }
+    case "subjective":
+      return { marksAwarded: 0, isGraded: false }
+    default:
+      return { marksAwarded: 0, isGraded: true }
+  }
+}
+
+// ─── GET ──────────────────────────────────────────────────────────────────────
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -26,9 +88,7 @@ export async function GET(
     const studentId = new ObjectId(session.user.id)
     const now = new Date()
 
-    // Get the test
     const test = await db.collection<Test>("tests").findOne({ _id: testId })
-
     if (!test) {
       return NextResponse.json(
         { success: false, error: "Test not found" },
@@ -36,7 +96,6 @@ export async function GET(
       )
     }
 
-    // Verify student has access
     const enrolledGroups = await db
       .collection<Group>("groups")
       .find({ memberIds: studentId, _id: { $in: test.groupIds } })
@@ -49,7 +108,6 @@ export async function GET(
       )
     }
 
-    // Check availability
     if (!test.isPublished || now < test.availableFrom || now > test.availableTo) {
       return NextResponse.json(
         { success: false, error: "This test is not currently available" },
@@ -57,14 +115,14 @@ export async function GET(
       )
     }
 
-    // Check for existing submission
-    let submission = await db.collection<Submission>("submissions").findOne({
-      testId,
-      studentId,
-    })
+    let submission = await db
+      .collection<Submission>("submissions")
+      .findOne({ testId, studentId })
 
-    // If submission exists and is already submitted/graded, don't allow retaking
-    if (submission && (submission.status === "submitted" || submission.status === "graded")) {
+    if (
+      submission &&
+      (submission.status === "submitted" || submission.status === "graded")
+    ) {
       return NextResponse.json({
         success: true,
         data: {
@@ -86,7 +144,6 @@ export async function GET(
       })
     }
 
-    // Create or get in-progress submission
     if (!submission) {
       const newSubmission: Submission = {
         testId,
@@ -98,20 +155,34 @@ export async function GET(
         startedAt: new Date(),
         status: "in-progress",
       }
-
-      const result = await db.collection<Submission>("submissions").insertOne(newSubmission)
+      const result = await db
+        .collection<Submission>("submissions")
+        .insertOne(newSubmission)
       submission = { ...newSubmission, _id: result.insertedId }
     }
 
-    // Return test questions without answers for students
     const questionsForStudent = test.questions.map((q) => ({
       id: q.id,
       type: q.type,
       text: q.text,
       marks: q.marks,
-      options: q.type === "mcq" ? q.options?.map((o) => ({ id: o.id, text: o.text })) : undefined,
+      options:
+        q.type === "mcq"
+          ? q.options?.map((o) => ({ id: o.id, text: o.text }))
+          : undefined,
       maxWords: q.type === "subjective" ? q.maxWords : undefined,
+      blanks:
+        q.type === "fill-blank" && q.blanks?.length
+          ? q.blanks.map(() => "")
+          : undefined,
+      matchPairs:
+        q.type === "match" && q.matchPairs?.length
+          ? q.matchPairs.map((p) => ({ id: p.id, left: p.left, right: p.right }))
+          : undefined,
     }))
+
+    // Tell the student whether results will be shown immediately
+    const autoGrade = test.autoGrade ?? true
 
     return NextResponse.json({
       success: true,
@@ -123,6 +194,8 @@ export async function GET(
           duration: test.duration,
           totalMarks: test.totalMarks,
           questions: questionsForStudent,
+          antiCheating: test.antiCheating,
+          autoGrade,
         },
         submission: {
           _id: submission._id!.toString(),
@@ -142,7 +215,8 @@ export async function GET(
   }
 }
 
-// POST submit test
+// ─── POST — submit ─────────────────────────────────────────────────────────
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -158,15 +232,16 @@ export async function POST(
       )
     }
 
-    const { answers } = await request.json()
+    const { answers, violations } = (await request.json()) as {
+      answers: Answer[]
+      violations?: ViolationEvent[]
+    }
 
     const db = await getDatabase()
     const testId = new ObjectId(id)
     const studentId = new ObjectId(session.user.id)
 
-    // Get test for auto-grading
     const test = await db.collection<Test>("tests").findOne({ _id: testId })
-
     if (!test) {
       return NextResponse.json(
         { success: false, error: "Test not found" },
@@ -174,47 +249,31 @@ export async function POST(
       )
     }
 
-    // Auto-grade MCQ and numerical questions
+    const hasViolations = Array.isArray(violations) && violations.length > 0
+
+    // Respect the test-level autoGrade setting.
+    // Also skip auto-grading if there were violations — teacher reviews first.
+    const shouldAutoGrade = (test.autoGrade ?? true) && !hasViolations
+
     let totalMarksAwarded = 0
     let allGraded = true
 
-    const gradedAnswers: Answer[] = answers.map((answer: Answer) => {
+    const gradedAnswers: Answer[] = answers.map((answer) => {
       const question = test.questions.find((q) => q.id === answer.questionId)
-      if (!question) return { ...answer, isGraded: true, marksAwarded: 0 }
+      if (!question) return { ...answer, isGraded: false, marksAwarded: 0 }
 
-      if (question.type === "mcq") {
-        const isCorrect = answer.selectedOptionId === question.correctOptionId
-        const marks = isCorrect ? question.marks : 0
-        totalMarksAwarded += marks
-        return {
-          ...answer,
-          isGraded: true,
-          marksAwarded: marks,
-        }
-      } else if (question.type === "numerical") {
-        const tolerance = question.tolerance || 0
-        const correctAnswer = question.correctAnswer || 0
-        const studentAnswer = answer.numericalAnswer || 0
-        const isCorrect = Math.abs(studentAnswer - correctAnswer) <= tolerance
-        const marks = isCorrect ? question.marks : 0
-        totalMarksAwarded += marks
-        return {
-          ...answer,
-          isGraded: true,
-          marksAwarded: marks,
-        }
-      } else {
-        // Subjective - needs manual grading
+      if (!shouldAutoGrade) {
         allGraded = false
-        return {
-          ...answer,
-          isGraded: false,
-        }
+        return { ...answer, isGraded: false, marksAwarded: 0 }
       }
+
+      const { marksAwarded, isGraded } = gradeAnswer(question, answer)
+      if (!isGraded) allGraded = false
+      totalMarksAwarded += marksAwarded
+      return { ...answer, isGraded, marksAwarded }
     })
 
-    // Update submission
-    const result = await db.collection<Submission>("submissions").updateOne(
+    await db.collection<Submission>("submissions").updateOne(
       { testId, studentId },
       {
         $set: {
@@ -222,16 +281,10 @@ export async function POST(
           submittedAt: new Date(),
           status: allGraded ? "graded" : "submitted",
           totalMarksAwarded: allGraded ? totalMarksAwarded : undefined,
+          violations: violations ?? [],
         },
       }
     )
-
-    if (result.matchedCount === 0) {
-      return NextResponse.json(
-        { success: false, error: "Submission not found" },
-        { status: 404 }
-      )
-    }
 
     return NextResponse.json({
       success: true,
@@ -239,6 +292,7 @@ export async function POST(
         status: allGraded ? "graded" : "submitted",
         totalMarksAwarded: allGraded ? totalMarksAwarded : undefined,
         totalMarks: test.totalMarks,
+        autoGraded: shouldAutoGrade && allGraded,
       },
     })
   } catch (error) {
@@ -250,7 +304,8 @@ export async function POST(
   }
 }
 
-// PUT save progress
+// ─── PUT — save progress ───────────────────────────────────────────────────
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -272,7 +327,6 @@ export async function PUT(
     const testId = new ObjectId(id)
     const studentId = new ObjectId(session.user.id)
 
-    // Update answers without submitting
     await db.collection<Submission>("submissions").updateOne(
       { testId, studentId, status: "in-progress" },
       { $set: { answers } }
