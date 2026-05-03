@@ -39,12 +39,40 @@ export async function POST(request: Request) {
       .findOne({ email: normalizedEmail })
 
     if (existing) {
+      // Account exists and is already verified — hard block
+      if (existing.isVerified) {
+        return NextResponse.json(
+          { success: false, error: "An account with this email already exists. Please sign in." },
+          { status: 409 }
+        )
+      }
+
+      // Account exists but is NOT verified — resend the verification email
+      // and return success so the user sees the "check your email" screen
+      const emailVerificationToken = crypto.randomBytes(32).toString("hex")
+      const emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000)
+
+      await db.collection<User>("users").updateOne(
+        { _id: existing._id },
+        { $set: { emailVerificationToken, emailVerificationExpires } }
+      )
+
+      try {
+        await sendVerificationEmail(normalizedEmail, emailVerificationToken)
+      } catch (emailError) {
+        console.error("Failed to resend verification email:", emailError)
+      }
+
       return NextResponse.json(
-        { success: false, error: "An account with this email already exists" },
-        { status: 409 }
+        {
+          success: true,
+          message: "Account created! Please check your email to verify your account before signing in.",
+        },
+        { status: 201 }
       )
     }
 
+    // Brand new account
     const hashedPassword = await bcrypt.hash(password, 12)
 
     // Generate a secure verification token (valid 24 hours)
@@ -69,7 +97,7 @@ export async function POST(request: Request) {
       await sendVerificationEmail(normalizedEmail, emailVerificationToken)
     } catch (emailError) {
       console.error("Failed to send verification email:", emailError)
-      // User is created; they can request a resend later
+      // User is created; they can request a resend from the success screen
     }
 
     return NextResponse.json(
