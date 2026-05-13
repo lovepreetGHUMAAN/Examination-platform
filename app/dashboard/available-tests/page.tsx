@@ -144,7 +144,7 @@ export default function AvailableTestsPage() {
                     <CardContent>
                       <div className="flex items-center justify-between">
                         <Badge variant="outline">{test.groupName}</Badge>
-                        <Link href={`/dashboard/my-results/${test.submissionId}`}>
+                        <Link href={`/dashboard/results/${test.submissionId}`}>
                           <Button variant="outline" size="sm">
                             View Result
                             <ArrowRight className="ml-2 h-4 w-4" />
